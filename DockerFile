@@ -1,0 +1,54 @@
+# Establece la imagen base para la etapa de construcción
+FROM mcr.microsoft.com/windows/servercore:ltsc2019 as builder
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Establece el directorio de trabajo
+WORKDIR /home/app
+
+# Copia los archivos necesarios para la instalación de dependencias
+COPY ./installers ./installers
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Instalación de Node.js
+RUN Invoke-WebRequest -Uri https://nodejs.org/dist/v14.17.0/node-v14.17.0-x64.msi -OutFile nodejs.msi; \
+    Start-Process msiexec.exe -ArgumentList '/i', 'nodejs.msi', '/quiet', '/norestart' -NoNewWindow -Wait; \
+    Remove-Item -Force nodejs.msi
+
+# Instalación de .NET Framework 4.5 y otros componentes
+# Se recomienda verificar si cada instalación es necesaria en la imagen final y considerar alternativas más ligeras si es posible
+RUN installers\dotnetfx45\dotNetFx45_Full_x86_x64.exe /q /norestart
+RUN installers\vcredist_x86\vcredist_x86.exe /install /quiet /norestart
+RUN msiexec /i installers\crystal_reports\CRRuntime_32bit_13_0_20.msi /quiet /qn /norestart
+RUN msiexec /i installers\winappdriver\WinAppDriver.msi /quiet /qn /norestart
+
+# Si la instalación de tu aplicación es necesaria en tiempo de build, inclúyela aquí
+# RUN installers\BusquedaProducto.application /quiet /norestart
+
+# Limpieza de instaladores para reducir el tamaño de la imagen
+RUN Remove-Item -Path installers -Recurse
+
+# Copia y construcción de la aplicación
+COPY ./src ./src
+RUN npm install
+RUN npm run build
+
+# Inicia la etapa de producción
+FROM mcr.microsoft.com/windows/servercore:ltsc2019
+
+WORKDIR /home/app
+
+# Copia solo los archivos necesarios desde la etapa de construcción
+COPY --from=builder /home/app/package*.json ./
+COPY --from=builder /home/app/dist ./dist
+
+# Instalación de dependencias de producción
+RUN npm ci --only=production
+
+# Exposición de puertos
+EXPOSE 12008
+EXPOSE 1433
+
+# Comando para ejecutar la aplicación
+CMD ["node","dist/App.js"]

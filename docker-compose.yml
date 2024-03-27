@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:  
+  # APP chilemat
+ winappdriver:
+    build: .
+    environment:      
+      - PORT=12000
+    ports:
+      - "12000:12000"
+      - "1433:1433"
